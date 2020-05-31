@@ -14,7 +14,8 @@
     "eslint-config-prettier/@typescript-eslint"
   ],
   "rules": {
-    "strict": ["error", "never"]
+    "strict": ["error", "never"],
+    "@typescript-eslint/no-non-null-assertion": ["off"]
   },
   "env": {
     "browser": true
