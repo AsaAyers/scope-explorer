@@ -1,173 +1,7 @@
-import * as parser from "@babel/parser"
-import traverse, { NodePath } from "@babel/traverse"
-import * as t from "@babel/types"
 import * as vscode from "vscode"
-import * as chroma from "chroma-js"
 import * as murmurHash3 from "murmurhash3js"
-
-type Color = string
-
-function generateColors(backgroundColor: string, diversity: number): Color[] {
-  const colors: Color[] = []
-  const saturation = 0.9
-  const luminosity = 0.5
-  const fade = 0.4
-
-  for (let i = 1; i < diversity; i++) {
-    const hue = i * (360 / diversity)
-    const color = chroma.hsl(hue, saturation, luminosity)
-
-    // color: contrast(@syntax-background-color, tint(@color, @fade), shade(@color, @fade)) !important;
-    // chroma.contrast(backgroundColor, color.tint(fade));
-    const shade = chroma.scale([color, "black"])
-    const tint = chroma.scale([color, "white"])
-
-    if (
-      chroma.contrast(backgroundColor, shade(fade)) >
-      chroma.contrast(backgroundColor, tint(fade))
-    ) {
-      colors.push(shade(fade).hex())
-    } else {
-      colors.push(tint(fade).hex())
-    }
-  }
-  return colors
-}
-
-type Binding = {
-  name: string
-  color: string
-  colorIndex: number
-  locations: Array<{ startPos: vscode.Position; endPos: vscode.Position }>
-}
-type Scope = {
-  startPos: vscode.Position
-  endPos: vscode.Position
-
-  bindings: Array<Binding>
-}
-
-function scan(sourceFilename: string, code: string, colors: string[]): Scope[] {
-  let ast
-  try {
-    ast = parser.parse(code, {
-      sourceType: "module",
-      sourceFilename,
-      plugins: [],
-    })
-  } catch (e) {
-    // TODO: tell the user this didn't parse
-    console.log("parse error", e)
-    return []
-  }
-
-  const scopes: Scope[] = []
-
-  const availableColors: string[] = []
-  availableColors.push(...colors)
-  const scopeColorMap = new WeakMap<NodePath<t.Scopable>, string[]>()
-  const identifierColorMap = new Map<string, string>()
-
-  traverse(
-    ast,
-    {
-      Scopable: {
-        exit(path) {
-          const scopeColors = scopeColorMap.get(path)
-          if (scopeColors) {
-            availableColors.unshift(...scopeColors)
-          }
-        },
-        enter(path, scopes) {
-          const scopeColors: string[] = []
-          scopeColorMap.set(path, scopeColors)
-
-          const bindings = Object.keys(path.scope.bindings).flatMap(
-            (name: string): Binding[] => {
-              // const binding = scope.bindings[key];
-              const binding = path.scope.getOwnBinding(name)
-              if (!binding) {
-                return []
-              }
-              const identifierLocation =
-                binding.identifier.start + ":" + binding.identifier.end
-              if (identifierColorMap.has(identifierLocation)) {
-                return []
-              }
-
-              if (availableColors.length === 0) {
-                availableColors.push(...colors)
-              }
-
-              const idx = murmurHash3.x86.hash32(name) % availableColors.length
-              // const idx = 0
-              const color = availableColors.splice(idx, 1)[0]
-              // const color = availableColors.shift()!;
-
-              scopeColors.push(color)
-              identifierColorMap.set(identifierLocation, color)
-
-              const loc = binding.identifier.loc
-
-              const locations = binding.referencePaths.flatMap((path) =>
-                path.node.loc ? [path.node.loc] : [],
-              )
-
-              if (loc) {
-                locations.push(loc)
-              }
-
-              const colorIndex = colors.indexOf(color)
-
-              return [
-                {
-                  name,
-                  color,
-                  colorIndex,
-                  locations: locations.map((loc) => {
-                    const startPos = new vscode.Position(
-                      loc.start.line - 1,
-                      loc.start.column,
-                    )
-                    const endPos = new vscode.Position(
-                      loc.end.line - 1,
-                      loc.end.column,
-                    )
-
-                    return { startPos, endPos }
-                  }),
-                },
-              ]
-            },
-          )
-
-          const { loc } = path.node
-          if (!loc) {
-            // I hope this is unreachable
-            console.warn("How can a scope not have a location?")
-            return
-          }
-
-          const startPos = new vscode.Position(
-            loc.start.line - 1,
-            loc.start.column,
-          )
-          const endPos = new vscode.Position(loc.end.line - 1, loc.end.column)
-
-          scopes.push({
-            startPos,
-            endPos,
-            bindings,
-          })
-        },
-      },
-    },
-    undefined,
-    scopes,
-  )
-
-  return scopes
-}
+import { Scope, scan } from "./scanner"
+import generateColors, { Color } from "./generateColors"
 
 // this method is called when vs code is activated
 export function activate(context: vscode.ExtensionContext): void {
@@ -232,11 +66,19 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const selection = activeEditor.selection
     for (const scope of scopes) {
+      const startPos = new vscode.Position(
+        scope.loc.start.line - 1,
+        scope.loc.start.column,
+      )
+      const endPos = new vscode.Position(
+        scope.loc.end.line - 1,
+        scope.loc.end.column,
+      )
       if (
         // If the scope starts after the anchor...
-        scope.startPos.compareTo(selection.anchor) > 0 ||
+        startPos.compareTo(selection.anchor) > 0 ||
         // or ends before the anchor
-        scope.endPos.compareTo(selection.anchor) < 0
+        endPos.compareTo(selection.anchor) < 0
       ) {
         // skip it
         continue
@@ -249,11 +91,17 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const options = optionMap.get(decoratorType)!
 
-        const decorations = locations.map(({ startPos, endPos }) => {
+        const decorations = locations.map((loc) => {
+          const startPos = new vscode.Position(
+            loc.start.line - 1,
+            loc.start.column,
+          )
+          const endPos = new vscode.Position(loc.end.line - 1, loc.end.column)
+
           const colorIndex = colors.indexOf(color)
           return {
             range: new vscode.Range(startPos, endPos),
-            hoverMessage: `${name} ${colorIndex} ${color} [${locations.length}]`,
+            hoverMessage: `${name} ${color} [${startPos.line}-${endPos.line}]`,
           }
         })
         options.push(...decorations)
