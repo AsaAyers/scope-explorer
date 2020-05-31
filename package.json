@@ -29,10 +29,15 @@
     "configuration": {
       "title": "scope-explorer",
       "properties": {
+        "scope-explorer.onlyColorAccessibleScopes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Only colors variables that can be accessed from where the cursor is."
+        },
         "scope-explorer.colorDiversity": {
           "type": "number",
           "default": 30,
-          "description": "Number of colors to generate"
+          "description": "Number of colors to generate. If the extension runs out of colors, it will reuse them"
         },
         "scope-explorer.backgroundColor": {
           "type": "string",

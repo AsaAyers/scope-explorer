@@ -34,7 +34,20 @@ function generateColors(backgroundColor: string, diversity: number): Color[] {
   return colors
 }
 
-function scan(sourceFilename: string, code: string, colors: string[]) {
+type Binding = {
+  name: string
+  color: string
+  colorIndex: number
+  locations: Array<{ startPos: vscode.Position; endPos: vscode.Position }>
+}
+type Scope = {
+  startPos: vscode.Position
+  endPos: vscode.Position
+
+  bindings: Array<Binding>
+}
+
+function scan(sourceFilename: string, code: string, colors: string[]): Scope[] {
   let ast
   try {
     ast = parser.parse(code, {
@@ -43,22 +56,16 @@ function scan(sourceFilename: string, code: string, colors: string[]) {
       plugins: [],
     })
   } catch (e) {
+    // TODO: tell the user this didn't parse
     console.log("parse error", e)
-    return
+    return []
   }
 
-  // I don't think I like this name
-  type SimpleScope = {
-    name: string
-    color: string
-    colorIndex: number
-    locations: Array<{ startPos: vscode.Position; endPos: vscode.Position }>
-  }
-  const state: SimpleScope[] = []
+  const scopes: Scope[] = []
 
   const availableColors: string[] = []
   availableColors.push(...colors)
-  const scopeColorMap = new WeakMap<NodePath<any>, string[]>()
+  const scopeColorMap = new WeakMap<NodePath<t.Scopable>, string[]>()
   const identifierColorMap = new Map<string, string>()
 
   traverse(
@@ -71,72 +78,95 @@ function scan(sourceFilename: string, code: string, colors: string[]) {
             availableColors.unshift(...scopeColors)
           }
         },
-        enter(path, state) {
-          const { scope } = path
+        enter(path, scopes) {
           const scopeColors: string[] = []
           scopeColorMap.set(path, scopeColors)
 
-          Object.keys(scope.bindings).forEach((name) => {
-            // const binding = scope.bindings[key];
-            const binding = scope.getOwnBinding(name)
-            if (!binding) {
-              return
-            }
-            const identifierLocation =
-              binding.identifier.start + ":" + binding.identifier.end
-            if (identifierColorMap.has(identifierLocation)) {
-              return
-            }
+          const bindings = Object.keys(path.scope.bindings).flatMap(
+            (name: string): Binding[] => {
+              // const binding = scope.bindings[key];
+              const binding = path.scope.getOwnBinding(name)
+              if (!binding) {
+                return []
+              }
+              const identifierLocation =
+                binding.identifier.start + ":" + binding.identifier.end
+              if (identifierColorMap.has(identifierLocation)) {
+                return []
+              }
 
-            if (availableColors.length === 0) {
-              availableColors.push(...colors)
-            }
+              if (availableColors.length === 0) {
+                availableColors.push(...colors)
+              }
 
-            const idx = murmurHash3.x86.hash32(name) % availableColors.length
-            // const idx = 0
-            const color = availableColors.splice(idx, 1)[0]
-            // const color = availableColors.shift()!;
+              const idx = murmurHash3.x86.hash32(name) % availableColors.length
+              // const idx = 0
+              const color = availableColors.splice(idx, 1)[0]
+              // const color = availableColors.shift()!;
 
-            scopeColors.push(color)
-            identifierColorMap.set(identifierLocation, color)
+              scopeColors.push(color)
+              identifierColorMap.set(identifierLocation, color)
 
-            const loc = binding.identifier.loc
+              const loc = binding.identifier.loc
 
-            const locations = binding.referencePaths.flatMap((path) =>
-              path.node.loc ? [path.node.loc] : [],
-            )
+              const locations = binding.referencePaths.flatMap((path) =>
+                path.node.loc ? [path.node.loc] : [],
+              )
 
-            if (loc) {
-              locations.push(loc)
-            }
+              if (loc) {
+                locations.push(loc)
+              }
 
-            const colorIndex = colors.indexOf(color)
-            state.push({
-              name,
-              color,
-              colorIndex,
-              locations: locations.map((loc) => {
-                const startPos = new vscode.Position(
-                  loc.start.line - 1,
-                  loc.start.column,
-                )
-                const endPos = new vscode.Position(
-                  loc.end.line - 1,
-                  loc.end.column,
-                )
+              const colorIndex = colors.indexOf(color)
 
-                return { startPos, endPos }
-              }),
-            })
+              return [
+                {
+                  name,
+                  color,
+                  colorIndex,
+                  locations: locations.map((loc) => {
+                    const startPos = new vscode.Position(
+                      loc.start.line - 1,
+                      loc.start.column,
+                    )
+                    const endPos = new vscode.Position(
+                      loc.end.line - 1,
+                      loc.end.column,
+                    )
+
+                    return { startPos, endPos }
+                  }),
+                },
+              ]
+            },
+          )
+
+          const { loc } = path.node
+          if (!loc) {
+            // I hope this is unreachable
+            console.warn("How can a scope not have a location?")
+            return
+          }
+
+          const startPos = new vscode.Position(
+            loc.start.line - 1,
+            loc.start.column,
+          )
+          const endPos = new vscode.Position(loc.end.line - 1, loc.end.column)
+
+          scopes.push({
+            startPos,
+            endPos,
+            bindings,
           })
         },
       },
     },
     undefined,
-    state,
+    scopes,
   )
 
-  return state
+  return scopes
 }
 
 // this method is called when vs code is activated
@@ -176,7 +206,8 @@ export function activate(context: vscode.ExtensionContext): void {
     "typescriptreact",
   ]
 
-  function updateDecorations() {
+  let scopes: Scope[] = []
+  function updateScopes() {
     if (!activeEditor) {
       return
     }
@@ -185,57 +216,90 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     const code = activeEditor.document.getText()
-    const state = scan(activeEditor.document.fileName, code, colors)
-    if (!state) {
+    scopes = scan(activeEditor.document.fileName, code, colors)
+    triggerUpdateDecorations(true)
+  }
+
+  function updateDecorations() {
+    if (!activeEditor) {
       return
     }
 
-    console.log(state)
+    const optionMap = new Map<
+      vscode.TextEditorDecorationType,
+      vscode.DecorationOptions[]
+    >()
 
-    const optionMap = state.reduce((optionMap, { name, locations, color }) => {
-      const decoratorType = getDecorator(color)
-      if (!optionMap.has(decoratorType)) {
-        optionMap.set(decoratorType, [])
+    const selection = activeEditor.selection
+    for (const scope of scopes) {
+      if (
+        // If the scope starts after the anchor...
+        scope.startPos.compareTo(selection.anchor) > 0 ||
+        // or ends before the anchor
+        scope.endPos.compareTo(selection.anchor) < 0
+      ) {
+        // skip it
+        continue
       }
-      const options = optionMap.get(decoratorType)!
 
-      const decorations = locations.map(({ startPos, endPos }) => {
-        const colorIndex = colors.indexOf(color)
-        return {
-          range: new vscode.Range(startPos, endPos),
-          hoverMessage: `${name} ${colorIndex} ${color} [${locations.length}]`,
+      for (const { name, locations, color } of scope.bindings) {
+        const decoratorType = getDecorator(color)
+        if (!optionMap.has(decoratorType)) {
+          optionMap.set(decoratorType, [])
         }
-      })
-      options.push(...decorations)
-      return optionMap
-    }, new Map<vscode.TextEditorDecorationType, vscode.DecorationOptions[]>())
+        const options = optionMap.get(decoratorType)!
 
-    decorators.forEach((decoratorType) => {
+        const decorations = locations.map(({ startPos, endPos }) => {
+          const colorIndex = colors.indexOf(color)
+          return {
+            range: new vscode.Range(startPos, endPos),
+            hoverMessage: `${name} ${colorIndex} ${color} [${locations.length}]`,
+          }
+        })
+        options.push(...decorations)
+      }
+    }
+
+    for (const [, decoratorType] of decorators) {
       const options = optionMap.get(decoratorType) ?? []
       if (activeEditor) {
         activeEditor.setDecorations(decoratorType, options)
       }
-    })
-  }
-  let timeout: NodeJS.Timer | undefined = undefined
-
-  function triggerUpdateDecorations() {
-    if (timeout) {
-      clearTimeout(timeout)
-      timeout = undefined
     }
-    timeout = setTimeout(updateDecorations, 500)
   }
+  function throttle<T extends () => void>(callback: T, ms: number) {
+    let timeout: NodeJS.Timer | undefined = undefined
+
+    return (immediate = false) => {
+      if (timeout) {
+        clearTimeout(timeout)
+        timeout = undefined
+      }
+      if (immediate) {
+        callback()
+      } else {
+        timeout = setTimeout(callback, ms)
+      }
+    }
+  }
+
+  const triggerUpdateScopes = throttle(updateScopes, 1000)
+  const triggerUpdateDecorations = throttle(updateDecorations, 500)
 
   if (activeEditor) {
-    triggerUpdateDecorations()
+    triggerUpdateScopes()
   }
+
+  vscode.window.onDidChangeTextEditorSelection((event) => {
+    activeEditor = event.textEditor
+    triggerUpdateDecorations()
+  })
 
   vscode.window.onDidChangeActiveTextEditor(
     (editor) => {
       activeEditor = editor
       if (editor) {
-        triggerUpdateDecorations()
+        triggerUpdateScopes(true)
       }
     },
     null,
@@ -245,7 +309,7 @@ export function activate(context: vscode.ExtensionContext): void {
   vscode.workspace.onDidChangeTextDocument(
     (event) => {
       if (activeEditor && event.document === activeEditor.document) {
-        triggerUpdateDecorations()
+        triggerUpdateScopes()
       }
     },
     null,
