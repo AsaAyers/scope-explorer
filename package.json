@@ -1,5 +1,5 @@
 {
-  "name": "untitled-vscode-project",
+  "name": "scope-explorer",
   "description": "Semantic variable colors based on scope",
   "version": "0.0.1",
   "publisher": "Asa Ayers",
@@ -24,6 +24,28 @@
           "light": "#FF000055",
           "highContrast": "#FF000055"
         }
+      }
+    ],
+    "configuration": {
+      "title": "scope-explorer",
+      "properties": {
+        "scope-explorer.colorDiversity": {
+          "type": "number",
+          "default": 30,
+          "description": "Number of colors to generate"
+        },
+        "scope-explorer.backgroundColor": {
+          "type": "string",
+          "default": "#1e1e1e",
+          "markdownDescription": "Your theme's background color. This is used to generate contrasting colors. VSCode doesn't allow extensions to [access theme's colors programmatically](https://github.com/Microsoft/vscode/issues/32813)"
+        }
+      }
+    },
+    "themes": [
+      {
+        "label": "scope-explorer",
+        "uiTheme": "vs-dark",
+        "path": "./themes/color-theme.json"
       }
     ]
   },

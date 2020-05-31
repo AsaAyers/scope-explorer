@@ -143,9 +143,16 @@ function scan(sourceFilename: string, code: string, colors: string[]) {
 export function activate(context: vscode.ExtensionContext): void {
   let activeEditor = vscode.window.activeTextEditor
 
-  const diversity = 30
-  const backgroundColor = "#1e1e1e"
-  const colors = generateColors(backgroundColor, diversity)
+  let colors: Color[] = []
+  function updateColors() {
+    const config = vscode.workspace.getConfiguration("scope-explorer")
+    const colorDiversity = config.get("colorDiversity", 30)
+    const backgroundColor = config.get("backgroundColor", "#1e1e1e")
+
+    colors = generateColors(backgroundColor, colorDiversity)
+  }
+  updateColors()
+  vscode.workspace.onDidChangeConfiguration(updateColors)
 
   const decorators = new Map<Color, vscode.TextEditorDecorationType>()
   function getDecorator(color: Color): vscode.TextEditorDecorationType {
