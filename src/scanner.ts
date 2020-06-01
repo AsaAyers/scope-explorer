@@ -3,11 +3,9 @@ import * as parser from "@babel/parser"
 import * as babel from "@babel/core"
 import traverse, { NodePath } from "@babel/traverse"
 import * as t from "@babel/types"
-import * as murmurHash3 from "murmurhash3js"
 
 export type Binding = {
   name: string
-  color: string
   colorIndex: number
   locations: Array<t.SourceLocation>
 }
@@ -17,13 +15,7 @@ export type Scope = {
 }
 
 const tsExtensions = [".ts", ".tsx"]
-export function scan(
-  sourceFilename: string,
-  code: string,
-  // TODO: Move color assignment out of the scanner
-  colors: string[],
-  randomizeColors: boolean,
-): Scope[] {
+export function scan(sourceFilename: string, code: string): Scope[] {
   let ast
 
   function generateParserOptions(): babel.ParserOptions {
@@ -88,24 +80,23 @@ export function scan(
 
   const scopes: Scope[] = []
 
-  const availableColors: string[] = []
-  availableColors.push(...colors)
-  const scopeColorMap = new WeakMap<NodePath<t.Scopable>, string[]>()
-  const identifierColorMap = new Map<string, string>()
+  const pathMap = new WeakMap<NodePath<t.Scopable>, Scope>()
+  const identifierColorMap = new Map<string, boolean>()
+
+  let colorIndex = 0
 
   traverse(
     ast,
     {
       Scopable: {
         exit(path) {
-          const scopeColors = scopeColorMap.get(path)
-          if (scopeColors) {
-            availableColors.unshift(...scopeColors)
+          const scope = pathMap.get(path)
+          if (scope) {
+            colorIndex -= scope.bindings.length
           }
         },
         enter(path, scopes) {
           const scopeColors: string[] = []
-          scopeColorMap.set(path, scopeColors)
 
           const bindings = Object.keys(path.scope.bindings).flatMap(
             (name: string): Binding[] => {
@@ -120,20 +111,7 @@ export function scan(
                 return []
               }
 
-              if (availableColors.length === 0) {
-                console.warn("Recycle colors")
-                availableColors.push(...colors)
-              }
-
-              let idx = 0
-              if (randomizeColors) {
-                idx = murmurHash3.x86.hash32(name) % availableColors.length
-              }
-
-              const color = availableColors.splice(idx, 1)[0]
-
-              scopeColors.push(color)
-              identifierColorMap.set(identifierLocation, color)
+              identifierColorMap.set(identifierLocation, true)
 
               const loc = binding.identifier.loc
               const locations = []
@@ -153,13 +131,10 @@ export function scan(
                 }),
               )
 
-              const colorIndex = colors.indexOf(color)
-
               return [
                 {
                   name,
-                  color,
-                  colorIndex,
+                  colorIndex: colorIndex++,
                   locations,
                 },
               ]
@@ -174,10 +149,9 @@ export function scan(
           }
 
           if (bindings.length > 0) {
-            scopes.push({
-              loc,
-              bindings,
-            })
+            const scope: Scope = { loc, bindings }
+            pathMap.set(path, scope)
+            scopes.push(scope)
           }
         },
       },

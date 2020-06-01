@@ -2,6 +2,27 @@ import * as chroma from "chroma-js"
 
 export type Color = string
 
+export function scrambleColors<T>(colors: readonly T[]): T[] {
+  const sourceColors: Array<T | null> = [...colors]
+  const step = 7
+  let found = 0
+  let index = 0
+
+  const colorOutput = []
+  while (found < sourceColors.length) {
+    index = (index + step + sourceColors.length) % sourceColors.length
+
+    if (sourceColors[index]) {
+      found++
+      colorOutput.push(sourceColors[index])
+      sourceColors[index] = null
+    }
+  }
+  return colorOutput.filter(function notEmpty(c): c is T {
+    return c != null
+  })
+}
+
 export default function generateColors(
   backgroundColor: string,
   diversity: number,
@@ -10,7 +31,7 @@ export default function generateColors(
   const saturation = 0.9
   const luminosity = 0.5
   const fade = 0.4
-  for (let i = 1; i < diversity; i++) {
+  for (let i = 0; i < diversity; i++) {
     const hue = i * (360 / diversity)
     const color = chroma.hsl(hue, saturation, luminosity)
     // color: contrast(@syntax-background-color, tint(@color, @fade), shade(@color, @fade)) !important;
@@ -26,5 +47,6 @@ export default function generateColors(
       colors.push(tint(fade).hex())
     }
   }
-  return colors
+
+  return scrambleColors(colors)
 }

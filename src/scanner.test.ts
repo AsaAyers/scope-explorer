@@ -2,8 +2,6 @@ import * as path from "path"
 import * as fs from "fs"
 import { scan, Scope } from "./scanner"
 import { promisify } from "util"
-import generateColors from "./generateColors"
-import { exportAllDeclaration } from "@babel/types"
 
 const readFile = promisify(fs.readFile)
 
@@ -23,11 +21,9 @@ function readableScope(scope: Scope) {
 }
 
 describe("scanner", () => {
-  const colors = generateColors("#1e1e1e", 50)
-
   async function scanFile(filename: string) {
     const code = String(await readFile(filename))
-    return scan(filename, code, colors, false)
+    return scan(filename, code)
   }
 
   test("can scan TS files in a project without a .babelrc", async () => {
@@ -47,7 +43,7 @@ describe("scanner", () => {
       }
     `
 
-    const scopes = scan(filename, code, colors, false)
+    const scopes = scan(filename, code)
 
     expect(scopes.map(readableScope)).toMatchInlineSnapshot(`
       Array [

@@ -1,7 +1,6 @@
 import * as vscode from "vscode"
-import * as murmurHash3 from "murmurhash3js"
 import { Scope, scan } from "./scanner"
-import generateColors, { Color } from "./generateColors"
+import generateColors, { Color, scrambleColors } from "./generateColors"
 
 // this method is called when vs code is activated
 export function activate(context: vscode.ExtensionContext): void {
@@ -15,9 +14,13 @@ export function activate(context: vscode.ExtensionContext): void {
     const colorDiversity = config.get("colorDiversity", 50)
     const backgroundColor = config.get("backgroundColor", "#1e1e1e")
     randomizeColors = config.get("randomizeColors", true)
+
     onlyColorAccessibleScopes = config.get("onlyColorAccessibleScopes", true)
 
     colors = generateColors(backgroundColor, colorDiversity)
+    if (randomizeColors) {
+      colors = scrambleColors(colors)
+    }
   }
   updateColors()
   vscode.workspace.onDidChangeConfiguration(updateColors)
@@ -54,8 +57,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     const code = activeEditor.document.getText()
-    scopes = scan(activeEditor.document.fileName, code, colors, randomizeColors)
-    triggerUpdateDecorations(true)
+    scopes = scan(activeEditor.document.fileName, code)
+    if (scopes) {
+      triggerUpdateDecorations(true)
+    }
   }
 
   function updateDecorations() {
@@ -89,8 +94,8 @@ export function activate(context: vscode.ExtensionContext): void {
           continue
         }
       }
-
-      for (const { name, locations, color } of scope.bindings) {
+      for (const { name, locations, colorIndex } of scope.bindings) {
+        const color = colors[colorIndex % colors.length]
         const decoratorType = getDecorator(color)
         if (!optionMap.has(decoratorType)) {
           optionMap.set(decoratorType, [])
