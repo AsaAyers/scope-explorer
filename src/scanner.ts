@@ -16,34 +16,13 @@ export type Scope = {
   bindings: Array<Binding>
 }
 
-function getParserOptions(filename: string): babel.ParserOptions | undefined {
-  try {
-    const partialConfig = babel.loadPartialConfig({
-      sourceType: "module",
-      babelrc: true,
-      // root: path.dirname(filename),
-      cwd: path.dirname(filename),
-      rootMode: "upward-optional",
-      filename,
-    })
-    console.log("partialConfig", partialConfig)
-
-    // In past projects I could use this, but TS says it's the wrong type now.
-    // https://github.com/AsaAyers/js-hyperclick/blob/master/lib/make-cache.js#L28-L35
-    //
-    // return partialConfig?.options
-  } catch (e) {
-    console.error("Error loading config")
-    console.error(e)
-  }
-  return
-}
-
 const tsExtensions = [".ts", ".tsx"]
 export function scan(
   sourceFilename: string,
   code: string,
+  // TODO: Move color assignment out of the scanner
   colors: string[],
+  randomizeColors: boolean,
 ): Scope[] {
   let ast
 
@@ -56,36 +35,38 @@ export function scan(
     return {
       sourceType: "module",
       sourceFilename,
+      // I had to disable almost all of these because something broke, which resulted in me needing to write
+      // the "can find ObjectMethod scopes" test.
       plugins: [
-        "asyncGenerators",
-        "bigInt",
-        "classPrivateMethods",
-        "classPrivateProperties",
-        "classProperties",
+        // "asyncGenerators",
+        // "bigInt",
+        // "classPrivateMethods",
+        // "classPrivateProperties",
+        // "classProperties",
         // "decorators",
         // "decorators-legacy",dd
-        "doExpressions",
-        "dynamicImport",
-        "estree",
-        "exportDefaultFrom",
+        // "doExpressions",
+        // "dynamicImport",
+        // "estree",
+        // "exportDefaultFrom",
         // "exportNamespaceFrom",
-        "functionBind",
-        "functionSent",
-        "importMeta",
+        // "functionBind",
+        // "functionSent",
+        // "importMeta",
         "jsx",
-        "logicalAssignment",
+        // "logicalAssignment",
         // "moduleAttributes",
-        "nullishCoalescingOperator",
-        "numericSeparator",
-        "objectRestSpread",
-        "optionalCatchBinding",
-        "optionalChaining",
-        "partialApplication",
+        // "nullishCoalescingOperator",
+        // "numericSeparator",
+        // "objectRestSpread",
+        // "optionalCatchBinding",
+        // "optionalChaining",
+        // "partialApplication",
         // "pipelineOperator",
         // "placeholders",
-        "privateIn",
-        "throwExpressions",
-        "topLevelAwait",
+        // "privateIn",
+        // "throwExpressions",
+        // "topLevelAwait",
         // "v8intrinsic",
 
         ...tmp,
@@ -93,16 +74,15 @@ export function scan(
     }
   }
 
-  const parserOptions =
-    getParserOptions(sourceFilename) ?? generateParserOptions()
+  const parserOptions = generateParserOptions()
 
-  console.log("babelConfig", parserOptions)
+  // console.log("babelConfig", parserOptions)
 
   try {
     ast = parser.parse(code, parserOptions)
   } catch (e) {
     // TODO: tell the user this didn't parse
-    console.log("parse error", e)
+    console.error("parse error", e)
     return []
   }
 
@@ -116,22 +96,6 @@ export function scan(
   traverse(
     ast,
     {
-      enter(path) {
-        console.log("type", path.type)
-        if (t.isObjectMethod(path)) {
-          console.log("method", t.isScopable(path))
-        }
-
-        if (t.isScopable(path)) {
-          const { loc } = path.node
-          if (!loc) {
-            console.warn("no loc?")
-            return
-          }
-
-          console.log("enter scope", `${loc.start.line}-${loc.end.line}`)
-        }
-      },
       Scopable: {
         exit(path) {
           const scopeColors = scopeColorMap.get(path)
@@ -161,10 +125,12 @@ export function scan(
                 availableColors.push(...colors)
               }
 
-              const idx = murmurHash3.x86.hash32(name) % availableColors.length
-              // const idx = 0
+              let idx = 0
+              if (randomizeColors) {
+                idx = murmurHash3.x86.hash32(name) % availableColors.length
+              }
+
               const color = availableColors.splice(idx, 1)[0]
-              // const color = availableColors.shift()!;
 
               scopeColors.push(color)
               identifierColorMap.set(identifierLocation, color)
@@ -187,8 +153,6 @@ export function scan(
                 }),
               )
 
-              console.log("binding", name, binding.identifier)
-
               const colorIndex = colors.indexOf(color)
 
               return [
@@ -209,12 +173,6 @@ export function scan(
             return
           }
 
-          console.log(
-            "scope",
-            `${loc.start.line}-${loc.end.line}`,
-            bindings.length,
-          )
-
           if (bindings.length > 0) {
             scopes.push({
               loc,
@@ -228,6 +186,5 @@ export function scan(
     scopes,
   )
 
-  console.log("scopes", scopes)
   return scopes
 }

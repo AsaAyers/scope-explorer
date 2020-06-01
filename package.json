@@ -34,9 +34,14 @@
           "default": false,
           "description": "Only colors variables that can be accessed from where the cursor is."
         },
+        "scope-explorer.randomizeColors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Choose random colors instead of assigning them in order. This helps prevent putting similar colors next to each other."
+        },
         "scope-explorer.colorDiversity": {
           "type": "number",
-          "default": 30,
+          "default": 50,
           "description": "Number of colors to generate. If the extension runs out of colors, it will reuse them"
         },
         "scope-explorer.backgroundColor": {

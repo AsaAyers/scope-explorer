@@ -8,10 +8,14 @@ export function activate(context: vscode.ExtensionContext): void {
   let activeEditor = vscode.window.activeTextEditor
 
   let colors: Color[] = []
+  let randomizeColors = true
+  let onlyColorAccessibleScopes = false
   function updateColors() {
     const config = vscode.workspace.getConfiguration("scope-explorer")
-    const colorDiversity = config.get("colorDiversity", 30)
+    const colorDiversity = config.get("colorDiversity", 50)
     const backgroundColor = config.get("backgroundColor", "#1e1e1e")
+    randomizeColors = config.get("randomizeColors", true)
+    onlyColorAccessibleScopes = config.get("onlyColorAccessibleScopes", true)
 
     colors = generateColors(backgroundColor, colorDiversity)
   }
@@ -50,7 +54,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     const code = activeEditor.document.getText()
-    scopes = scan(activeEditor.document.fileName, code, colors)
+    scopes = scan(activeEditor.document.fileName, code, colors, randomizeColors)
     triggerUpdateDecorations(true)
   }
 
@@ -66,22 +70,24 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const selection = activeEditor.selection
     for (const scope of scopes) {
-      const startPos = new vscode.Position(
-        scope.loc.start.line - 1,
-        scope.loc.start.column,
-      )
-      const endPos = new vscode.Position(
-        scope.loc.end.line - 1,
-        scope.loc.end.column,
-      )
-      if (
-        // If the scope starts after the anchor...
-        startPos.compareTo(selection.anchor) > 0 ||
-        // or ends before the anchor
-        endPos.compareTo(selection.anchor) < 0
-      ) {
-        // skip it
-        continue
+      if (onlyColorAccessibleScopes) {
+        const startPos = new vscode.Position(
+          scope.loc.start.line - 1,
+          scope.loc.start.column,
+        )
+        const endPos = new vscode.Position(
+          scope.loc.end.line - 1,
+          scope.loc.end.column,
+        )
+        if (
+          // If the scope starts after the anchor...
+          startPos.compareTo(selection.anchor) > 0 ||
+          // or ends before the anchor
+          endPos.compareTo(selection.anchor) < 0
+        ) {
+          // skip it
+          continue
+        }
       }
 
       for (const { name, locations, color } of scope.bindings) {
@@ -101,7 +107,7 @@ export function activate(context: vscode.ExtensionContext): void {
           const colorIndex = colors.indexOf(color)
           return {
             range: new vscode.Range(startPos, endPos),
-            hoverMessage: `${name} ${color} [${startPos.line}-${endPos.line}]`,
+            hoverMessage: `${name} ${color} [${colorIndex}]`,
           }
         })
         options.push(...decorations)
@@ -147,6 +153,7 @@ export function activate(context: vscode.ExtensionContext): void {
     (editor) => {
       activeEditor = editor
       if (editor) {
+        scopes = []
         triggerUpdateScopes(true)
       }
     },

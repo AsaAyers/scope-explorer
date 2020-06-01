@@ -23,32 +23,31 @@ function readableScope(scope: Scope) {
 }
 
 describe("scanner", () => {
-  const colors = generateColors("#1e1e1e", 30)
+  const colors = generateColors("#1e1e1e", 50)
 
   async function scanFile(filename: string) {
     const code = String(await readFile(filename))
-    return scan(filename, code, colors)
+    return scan(filename, code, colors, false)
   }
 
   test("can scan TS files in a project without a .babelrc", async () => {
     const filename = path.join(__dirname, "scanner.ts")
 
-    console.log("filename", filename)
     await expect(scanFile(filename)).resolves.toBeDefined()
   })
 
-  test.only("can find ObjectMethod scopes", async () => {
-    const filename = path.join(__dirname, "fixtures", "scopable.ts")
+  test("can find ObjectMethod scopes", async () => {
+    const filename = path.join(__dirname, "test.js")
     const code = `
-const foo = {
-  enter: () => {
-    const findMe = null
-    return findMe
-  },
-}
+      const foo = {
+        enter: () => {
+          const findMe = null
+          return findMe
+        },
+      }
     `
 
-    const scopes = scan(filename, code, colors)
+    const scopes = scan(filename, code, colors, false)
 
     expect(scopes.map(readableScope)).toMatchInlineSnapshot(`
       Array [
@@ -57,14 +56,32 @@ const foo = {
             Object {
               "foo": Array [
                 Array [
-                  "2:6",
-                  "2:9",
+                  "2:12",
+                  "2:15",
                 ],
               ],
             },
           ],
           "from": 1,
           "to": 8,
+        },
+        Object {
+          "bindings": Array [
+            Object {
+              "findMe": Array [
+                Array [
+                  "4:16",
+                  "4:22",
+                ],
+                Array [
+                  "5:17",
+                  "5:23",
+                ],
+              ],
+            },
+          ],
+          "from": 3,
+          "to": 6,
         },
       ]
     `)
